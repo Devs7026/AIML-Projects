@@ -10,8 +10,37 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# Set page config
-st.set_page_config(page_title="Stock Price Prediction", layout="wide")
+# Set page config with a clean theme
+st.set_page_config(
+    page_title="Stock Price Prediction",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Add minimal custom CSS for better styling
+st.markdown("""
+    <style>
+    .main {
+        padding: 2rem;
+    }
+    .stButton>button {
+        background-color: #0066cc;
+        color: white;
+        border-radius: 4px;
+        padding: 0.5rem 1rem;
+        border: none;
+    }
+    .stButton>button:hover {
+        background-color: #0052a3;
+    }
+    .metric-card {
+        background-color: black;
+        padding: 1rem;
+        border-radius: 4px;
+        border: 1px solid #e9ecef;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # Initialize session state for model caching
 if 'model' not in st.session_state:
@@ -54,28 +83,36 @@ def build_lstm_model(input_shape):
 def plot_stock_data(data, predictions=None):
     fig = go.Figure()
     
-    # Plot actual prices
+    # Plot actual prices with improved styling
     fig.add_trace(go.Scatter(
         x=data.index,
         y=data['Close'],
         name='Actual Price',
-        line=dict(color='blue')
+        line=dict(color='#0066cc', width=2)
     ))
     
-    # Plot predictions 
     if predictions is not None:
         fig.add_trace(go.Scatter(
             x=data.index[-len(predictions):],
             y=predictions,
             name='Predicted Price',
-            line=dict(color='red', dash='dash')
+            line=dict(color='#28a745', width=2, dash='dash')
         ))
     
     fig.update_layout(
         title='Stock Price History and Predictions',
         xaxis_title='Date',
         yaxis_title='Price',
-        hovermode='x unified'
+        hovermode='x unified',
+        template='plotly_white',
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        margin=dict(l=20, r=20, t=40, b=20)
     )
     
     return fig
@@ -150,19 +187,42 @@ def plot_accuracy_metrics(data, predictions, metrics):
 def main():
     st.title("Stock Price Prediction with LSTM")
     
-   
-    st.write("""
-    This application uses LSTM (Long Short-Term Memory) neural networks to predict stock prices.
-    Enter a stock ticker symbol and adjust the parameters to train the model and make predictions.
-    """)
+    # Add image slider
+    st.markdown("""
+    <style>
+    .stImage {
+        text-align: center;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-   
+    # Keep only the second image
+    image = "https://img.freepik.com/free-vector/gradient-stock-market-concept_23-2149166910.jpg"
+    
+    # Display the single image
+    st.image(image, 
+            caption="Stock Market Analysis", 
+            use_container_width=True)
+    
+    # Add a small description below the image
+    st.markdown("""
+    <div style='text-align: center; padding: 0.5rem; background-color: black; border-radius: 4px; margin: 1rem 0;'>
+        <p style='color: #e9ecef;'>Explore stock market analysis through our interactive prediction tool</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div style='text-align: center; padding: 1rem; background-color: black; border-radius: 4px; margin-bottom: 1rem;'>
+        <p>This application uses LSTM neural networks to predict stock prices. Enter a stock ticker symbol and adjust the parameters to train the model and make predictions.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.sidebar.header("Input Parameters")
     
-   
     ticker = st.sidebar.text_input("Stock Ticker Symbol", "AAPL").upper()
     
-   
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365*2)  # 2 years of data
     
@@ -172,28 +232,162 @@ def main():
     with col2:
         end_date = st.date_input("End Date", end_date)
     
-    # Model parameters
+    # Model parameters with improved layout
     st.sidebar.subheader("Model Parameters")
     epochs = st.sidebar.slider("Number of Epochs", 10, 100, 50)
     batch_size = st.sidebar.slider("Batch Size", 16, 64, 32)
+    
+    # Add a new section for custom data upload
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Custom Data Training")
+    
+    # Add file uploader
+    uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=['csv'])
+    
+    if uploaded_file is not None:
+        try:
+            # Read the uploaded file
+            custom_data = pd.read_csv(uploaded_file)
+            
+            # Display data preview
+            st.sidebar.markdown("### Data Preview")
+            st.sidebar.dataframe(custom_data.head())
+            
+            # Add column selection
+            st.sidebar.markdown("### Select Columns")
+            date_col = st.sidebar.selectbox("Select Date Column", custom_data.columns)
+            price_col = st.sidebar.selectbox("Select Price Column", custom_data.columns)
+            
+            # Add data validation
+            if st.sidebar.button("Validate Data"):
+                try:
+                    # Convert date column to datetime
+                    custom_data[date_col] = pd.to_datetime(custom_data[date_col])
+                    # Sort by date
+                    custom_data = custom_data.sort_values(date_col)
+                    # Set date as index
+                    custom_data = custom_data.set_index(date_col)
+                    # Select only the price column
+                    custom_data = custom_data[[price_col]]
+                    
+                    st.sidebar.success("Data validated successfully!")
+                    
+                    # Add training button for custom data
+                    if st.sidebar.button("Train on Custom Data"):
+                        with st.spinner("Training model on custom data..."):
+                            try:
+                                # Preprocess custom data
+                                X_train, X_test, y_train, y_test, scaler = preprocess_data(custom_data)
+                                
+                                # Build and train model
+                                model = build_lstm_model((X_train.shape[1], 1))
+                                history = model.fit(
+                                    X_train, y_train,
+                                    epochs=epochs,
+                                    batch_size=batch_size,
+                                    validation_split=0.1,
+                                    verbose=0
+                                )
+                                
+                                # Store model and scaler in session state
+                                st.session_state.model = model
+                                st.session_state.scaler = scaler
+                                
+                                # Make predictions
+                                predictions = model.predict(X_test)
+                                predictions = scaler.inverse_transform(predictions.reshape(-1, 1))
+                                y_test_actual = scaler.inverse_transform(y_test.reshape(-1, 1))
+                                
+                                # Calculate accuracy metrics
+                                metrics = calculate_accuracy_metrics(y_test_actual, predictions)
+                                
+                                # Display results
+                                st.success("Model training completed on custom data!")
+                                
+                                # Display metrics
+                                st.subheader("Custom Data Model Accuracy Metrics")
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <h4>MAE</h4>
+                                    <h3>${metrics['MAE']:.2f}</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <h4>RMSE</h4>
+                                    <h3>${metrics['RMSE']:.2f}</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <h4>R² Score</h4>
+                                    <h3>{metrics['R2 Score']:.3f}</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <h4>Directional Accuracy</h4>
+                                    <h3>{metrics['Directional Accuracy']:.1f}%</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Plot predictions
+                                fig_predictions = plot_accuracy_metrics(custom_data, predictions, metrics)
+                                st.plotly_chart(fig_predictions, use_container_width=True)
+                                
+                                # Make next day prediction
+                                latest_sequence = custom_data[-60:].values
+                                latest_sequence_scaled = scaler.transform(latest_sequence)
+                                latest_sequence_reshaped = np.reshape(latest_sequence_scaled, (1, 60, 1))
+                                next_day_prediction = model.predict(latest_sequence_reshaped)
+                                next_day_price = scaler.inverse_transform(next_day_prediction)[0][0]
+                                
+                                st.subheader("Next Day Prediction")
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <h3>Predicted Price: ${next_day_price:.2f}</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                            except Exception as e:
+                                st.error(f"Error during custom data training: {str(e)}")
+                                
+                except Exception as e:
+                    st.sidebar.error(f"Error validating data: {str(e)}")
+                    
+        except Exception as e:
+            st.sidebar.error(f"Error reading file: {str(e)}")
     
     # Create two columns for the main content
     col1, col2 = st.columns(2)
     
     with col1:
+        st.markdown("""
+        <div style='display: flex; align-items: center; gap: 10px;'>
+            <img src='https://img.icons8.com/color/48/000000/line-chart.png' width='30'/>
+            <h2>Historical Data</h2>
+        </div>
+        """, unsafe_allow_html=True)
         st.subheader("Historical Data")
         try:
             data = fetch_data(ticker, start_date, end_date)
             fig = plot_stock_data(data)
             st.plotly_chart(fig, use_container_width=True)
             
-            # Display basic statistics
-            st.write("### Basic Statistics")
-            st.write(data.describe())
+            # Display basic statistics with improved styling
+            st.markdown("### Basic Statistics")
+            stats = data.describe()
+            st.dataframe(stats.style.background_gradient(cmap='Blues', axis=0))
         except Exception as e:
             st.error(f"Error fetching data: {str(e)}")
     
     with col2:
+        st.markdown("""
+        <div style='display: flex; align-items: center; gap: 10px;'>
+            <img src='https://img.icons8.com/color/48/000000/artificial-intelligence.png' width='30'/>
+            <h2>Model Training</h2>
+        </div>
+        """, unsafe_allow_html=True)
         st.subheader("Model Training")
         if st.button("Train Model"):
             with st.spinner("Training model..."):
@@ -224,26 +418,54 @@ def main():
                     # Calculate accuracy metrics
                     metrics = calculate_accuracy_metrics(y_test_actual, predictions)
                     
-                    # Display results
+                    # Display results with improved styling
                     st.success("Model training completed!")
                     
-                    # Display accuracy metrics
+                    # Display metrics in a cleaner format
                     st.subheader("Model Accuracy Metrics")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("MAE", f"${metrics['MAE']:.2f}")
-                    with col2:
-                        st.metric("RMSE", f"${metrics['RMSE']:.2f}")
-                    with col3:
-                        st.metric("R² Score", f"{metrics['R2 Score']:.3f}")
-                    with col4:
-                        st.metric("Directional Accuracy", f"{metrics['Directional Accuracy']:.1f}%")
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <h4>MAE</h4>
+                        <h3>${metrics['MAE']:.2f}</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <h4>RMSE</h4>
+                        <h3>${metrics['RMSE']:.2f}</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <h4>R² Score</h4>
+                        <h3>{metrics['R2 Score']:.3f}</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <h4>Directional Accuracy</h4>
+                        <h3>{metrics['Directional Accuracy']:.1f}%</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    # Plot training history
+                    # Plot training history with improved styling
                     fig_history = go.Figure()
-                    fig_history.add_trace(go.Scatter(y=history.history['loss'], name='Training Loss'))
-                    fig_history.add_trace(go.Scatter(y=history.history['val_loss'], name='Validation Loss'))
-                    fig_history.update_layout(title='Model Training Progress', xaxis_title='Epoch', yaxis_title='Loss')
+                    fig_history.add_trace(go.Scatter(
+                        y=history.history['loss'],
+                        name='Training Loss',
+                        line=dict(color='#0066cc')
+                    ))
+                    fig_history.add_trace(go.Scatter(
+                        y=history.history['val_loss'],
+                        name='Validation Loss',
+                        line=dict(color='#28a745')
+                    ))
+                    fig_history.update_layout(
+                        title='Model Training Progress',
+                        xaxis_title='Epoch',
+                        yaxis_title='Loss',
+                        template='plotly_white'
+                    )
                     st.plotly_chart(fig_history, use_container_width=True)
                     
                     # Plot predictions with accuracy metrics
@@ -258,32 +480,60 @@ def main():
                     next_day_price = scaler.inverse_transform(next_day_prediction)[0][0]
                     
                     st.subheader("Next Day Prediction")
-                    st.metric("Predicted Price", f"${next_day_price:.2f}")
+                    st.markdown(f"""
+                    <div class='metric-card'>
+                        <h3>Predicted Price: ${next_day_price:.2f}</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    # Add interpretation of metrics
+                    # Add interpretation of metrics with improved styling
                     st.subheader("Understanding the Metrics")
-                    st.write("""
-                    - **MAE (Mean Absolute Error)**: Average absolute difference between predicted and actual prices
-                    - **RMSE (Root Mean Square Error)**: Square root of the average squared differences
-                    - **R² Score**: Proportion of variance in the dependent variable predictable from the independent variable
-                    - **Directional Accuracy**: Percentage of times the model correctly predicts price movement direction
-                    """)
+                    st.markdown("""
+                    <div style='background-color: black; padding: 1.5rem; border-radius: 8px; line-height: 1.6;'>
+                        <h4 style='color: #0066cc; margin-bottom: 1rem;'>Key Performance Indicators:</h4>
+                        <ul style='list-style-type: none; padding-left: 0;'>
+                            <li style='margin-bottom: 0.8rem;'>
+                                <strong style='color: #28a745;'>MAE (Mean Absolute Error):</strong><br>
+                                <span style='color: #e9ecef;'>Average absolute difference between predicted and actual prices</span>
+                            </li>
+                            <li style='margin-bottom: 0.8rem;'>
+                                <strong style='color: #28a745;'>RMSE (Root Mean Square Error):</strong><br>
+                                <span style='color: #e9ecef;'>Square root of the average squared differences</span>
+                            </li>
+                            <li style='margin-bottom: 0.8rem;'>
+                                <strong style='color: #28a745;'>R² Score:</strong><br>
+                                <span style='color: #e9ecef;'>Proportion of variance in the dependent variable predictable from the independent variable.Should be close to 1.</span>
+                            </li>
+                            <li style='margin-bottom: 0.8rem;'>
+                                <strong style='color: #28a745;'>Directional Accuracy:</strong><br>
+                                <span style='color: #e9ecef;'>Percentage of times the model correctly predicts price movement direction</span>
+                            </li>
+                        </ul>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
                 except Exception as e:
                     st.error(f"Error during model training: {str(e)}")
         else:
             st.info("Click the 'Train Model' button to start training the LSTM model.")
     
-    # Add footer
+    # Add footer with improved styling
     st.markdown("---")
     st.markdown("""
-    ### How to use this app:
-    1. Enter a stock ticker symbol (e.g., AAPL, GOOGL, MSFT)
-    2. Adjust the date range if needed
-    3. Modify model parameters (epochs and batch size) if desired
-    4. Click 'Train Model' to start the prediction process
-    5. View the results, including predictions and performance metrics
-    """)
+    <div style='background-color: black; padding: 1rem; border-radius: 4px;'>
+        <div style='display: flex; align-items: center; gap: 10px; margin-bottom: 1rem;'>
+            <img src='https://img.icons8.com/color/48/000000/help.png' width='30'/>
+            <h3>How to use this app:</h3>
+        </div>
+        <ol>
+            <li>Enter a stock ticker symbol (e.g., AAPL, GOOGL, MSFT)</li>
+            <li>Adjust the date range if needed</li>
+            <li>Modify model parameters (epochs and batch size) if desired</li>
+            <li>Click 'Train Model' to start the prediction process</li>
+            <li>View the results, including predictions and performance metrics</li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main() 
