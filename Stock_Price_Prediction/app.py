@@ -49,26 +49,58 @@ if 'scaler' not in st.session_state:
     st.session_state.scaler = None
 
 def fetch_data(ticker, start_date, end_date):
-    data = yf.download(ticker, start=start_date, end=end_date)
-    return data[['Close']]
+    try:
+        data = yf.download(ticker, start=start_date, end=end_date)
+        if data.empty:
+            raise ValueError(f"No data found for ticker {ticker}")
+        
+        # Calculate technical indicators
+        data['SMA_20'] = calculate_sma(data['Close'], window=20)
+        data['RSI_14'] = calculate_rsi(data['Close'], window=14)
+        
+        # Drop NaN values
+        data = data.dropna()
+        
+        if len(data) < 60:  # Minimum required for sequence length
+            raise ValueError("Not enough data points for analysis")
+            
+        return data
+    except Exception as e:
+        raise Exception(f"Error fetching data: {str(e)}")
+
+def calculate_sma(data, window=20):
+    """Calculate Simple Moving Average."""
+    return data.rolling(window=window).mean()
+
+def calculate_rsi(data, window=14):
+    """Calculate Relative Strength Index."""
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
 def preprocess_data(data, sequence_length=60, train_split=0.8):
+    # Select features for scaling
+    features = ['Close', 'SMA_20', 'RSI_14']
+    feature_data = data[features]
+    
+    # Scale the features
     scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
+    scaled_data = scaler.fit_transform(feature_data)
     
     X, y = [], []
     for i in range(sequence_length, len(scaled_data)):
-        X.append(scaled_data[i-sequence_length:i, 0])
-        y.append(scaled_data[i, 0])
+        X.append(scaled_data[i-sequence_length:i, :])
+        y.append(scaled_data[i, 0])  # Predict Close price
     
     X, y = np.array(X), np.array(y)
-    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
     
     split_idx = int(train_split * len(X))
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
     
-    return X_train, X_test, y_train, y_test, scaler
+    return X_train, X_test, y_train, y_test, scaler, data, features
 
 def build_lstm_model(input_shape):
     model = Sequential()
@@ -83,12 +115,20 @@ def build_lstm_model(input_shape):
 def plot_stock_data(data, predictions=None):
     fig = go.Figure()
     
-    # Plot actual prices with improved styling
+    # Plot actual prices
     fig.add_trace(go.Scatter(
         x=data.index,
         y=data['Close'],
         name='Actual Price',
         line=dict(color='#0066cc', width=2)
+    ))
+    
+    # Plot SMA
+    fig.add_trace(go.Scatter(
+        x=data.index,
+        y=data['SMA_20'],
+        name='20-day SMA',
+        line=dict(color='#ff9900', width=1)
     ))
     
     if predictions is not None:
@@ -99,10 +139,25 @@ def plot_stock_data(data, predictions=None):
             line=dict(color='#28a745', width=2, dash='dash')
         ))
     
+    # Add RSI subplot
+    fig.add_trace(go.Scatter(
+        x=data.index,
+        y=data['RSI_14'],
+        name='RSI (14)',
+        line=dict(color='#ff4444', width=1),
+        yaxis='y2'
+    ))
+    
     fig.update_layout(
-        title='Stock Price History and Predictions',
+        title='Stock Price History and Technical Indicators',
         xaxis_title='Date',
         yaxis_title='Price',
+        yaxis2=dict(
+            title='RSI',
+            overlaying='y',
+            side='right',
+            range=[0, 100]
+        ),
         hovermode='x unified',
         template='plotly_white',
         showlegend=True,
@@ -277,10 +332,10 @@ def main():
                         with st.spinner("Training model on custom data..."):
                             try:
                                 # Preprocess custom data
-                                X_train, X_test, y_train, y_test, scaler = preprocess_data(custom_data)
+                                X_train, X_test, y_train, y_test, scaler, data, features = preprocess_data(custom_data)
                                 
                                 # Build and train model
-                                model = build_lstm_model((X_train.shape[1], 1))
+                                model = build_lstm_model((X_train.shape[1], X_train.shape[2]))
                                 history = model.fit(
                                     X_train, y_train,
                                     epochs=epochs,
@@ -295,8 +350,18 @@ def main():
                                 
                                 # Make predictions
                                 predictions = model.predict(X_test)
-                                predictions = scaler.inverse_transform(predictions.reshape(-1, 1))
-                                y_test_actual = scaler.inverse_transform(y_test.reshape(-1, 1))
+                                
+                                # Create a dummy array with zeros for other features
+                                dummy_array = np.zeros((len(predictions), len(features)))
+                                dummy_array[:, 0] = predictions.flatten()  # Put predictions in first column
+                                
+                                # Inverse transform
+                                predictions = scaler.inverse_transform(dummy_array)[:, 0]
+                                
+                                # Do the same for actual values
+                                dummy_array = np.zeros((len(y_test), len(features)))
+                                dummy_array[:, 0] = y_test.flatten()
+                                y_test_actual = scaler.inverse_transform(dummy_array)[:, 0]
                                 
                                 # Calculate accuracy metrics
                                 metrics = calculate_accuracy_metrics(y_test_actual, predictions)
@@ -340,7 +405,11 @@ def main():
                                 latest_sequence_scaled = scaler.transform(latest_sequence)
                                 latest_sequence_reshaped = np.reshape(latest_sequence_scaled, (1, 60, 1))
                                 next_day_prediction = model.predict(latest_sequence_reshaped)
-                                next_day_price = scaler.inverse_transform(next_day_prediction)[0][0]
+                                
+                                # Create dummy array for inverse transform
+                                dummy_array = np.zeros((1, len(features)))
+                                dummy_array[0, 0] = next_day_prediction[0, 0]
+                                next_day_price = scaler.inverse_transform(dummy_array)[0, 0]
                                 
                                 st.subheader("Next Day Prediction")
                                 st.markdown(f"""
@@ -394,10 +463,10 @@ def main():
                 try:
                     # Fetch and prepare data
                     data = fetch_data(ticker, start_date, end_date)
-                    X_train, X_test, y_train, y_test, scaler = preprocess_data(data)
+                    X_train, X_test, y_train, y_test, scaler, data, features = preprocess_data(data)
                     
                     # Build and train model
-                    model = build_lstm_model((X_train.shape[1], 1))
+                    model = build_lstm_model((X_train.shape[1], X_train.shape[2]))
                     history = model.fit(
                         X_train, y_train,
                         epochs=epochs,
@@ -412,8 +481,18 @@ def main():
                     
                     # Make predictions
                     predictions = model.predict(X_test)
-                    predictions = scaler.inverse_transform(predictions.reshape(-1, 1))
-                    y_test_actual = scaler.inverse_transform(y_test.reshape(-1, 1))
+                    
+                    # Create a dummy array with zeros for other features
+                    dummy_array = np.zeros((len(predictions), len(features)))
+                    dummy_array[:, 0] = predictions.flatten()  # Put predictions in first column
+                    
+                    # Inverse transform
+                    predictions = scaler.inverse_transform(dummy_array)[:, 0]
+                    
+                    # Do the same for actual values
+                    dummy_array = np.zeros((len(y_test), len(features)))
+                    dummy_array[:, 0] = y_test.flatten()
+                    y_test_actual = scaler.inverse_transform(dummy_array)[:, 0]
                     
                     # Calculate accuracy metrics
                     metrics = calculate_accuracy_metrics(y_test_actual, predictions)
@@ -473,11 +552,15 @@ def main():
                     st.plotly_chart(fig_predictions, use_container_width=True)
                     
                     # Make next day prediction
-                    latest_sequence = data[-60:].values
+                    latest_sequence = data[features].values[-60:]
                     latest_sequence_scaled = scaler.transform(latest_sequence)
-                    latest_sequence_reshaped = np.reshape(latest_sequence_scaled, (1, 60, 1))
+                    latest_sequence_reshaped = np.reshape(latest_sequence_scaled, (1, 60, len(features)))
                     next_day_prediction = model.predict(latest_sequence_reshaped)
-                    next_day_price = scaler.inverse_transform(next_day_prediction)[0][0]
+                    
+                    # Create dummy array for inverse transform
+                    dummy_array = np.zeros((1, len(features)))
+                    dummy_array[0, 0] = next_day_prediction[0, 0]
+                    next_day_price = scaler.inverse_transform(dummy_array)[0, 0]
                     
                     st.subheader("Next Day Prediction")
                     st.markdown(f"""
