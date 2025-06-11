@@ -112,3 +112,12 @@ Feel free to submit issues and enhancement requests!
 - Streamlit for the web framework
 - TensorFlow/Keras for the LSTM implementation
 - Technical analysis community for indicator formulas
+
+## Video Demonstration
+
+
+
+https://github.com/user-attachments/assets/6ee01155-1195-4abd-97fc-5666fb8d5fc2
+
+
+
