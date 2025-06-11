@@ -29,19 +29,6 @@ The model incorporates several technical indicators to enhance prediction accura
    - 9-day Signal line
    - Trend direction and momentum analysis
 
-4. **Bollinger Bands**
-   - 20-day middle band
-   - Upper and lower bands (2 standard deviations)
-   - Volatility and price level analysis
-
-5. **Average True Range (ATR)**
-   - 14-day ATR
-   - Market volatility measurement
-
-6. **Stochastic Oscillator**
-   - %K line (14-day)
-   - %D line (3-day)
-   - Momentum and overbought/oversold conditions
 
 ## How It Works
 1. **Data Collection**
